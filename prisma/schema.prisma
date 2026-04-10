@@ -1,0 +1,247 @@
+generator client {
+  provider             = "prisma-client-py"
+  interface            = "asyncio"
+  recursive_type_depth = 5
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TipoUsuario {
+  ADMIN
+  PROFESSOR
+  ALUNO
+}
+
+enum TipoToken {
+  ACCESS
+  REFRESH
+}
+
+enum TipoQuestao {
+  MULTIPLA_ESCOLHA
+  VERDADEIRO_FALSO
+  DISSERTATIVA
+}
+
+enum TipoDificuldade {
+  FACIL
+  MEDIO
+  DIFICIL
+}
+
+enum StatusNotificacao {
+  PENDENTE
+  LIDA
+  ARQUIVADA
+}
+
+enum ResultadoAcesso {
+  SUCESSO
+  FALHA
+}
+
+model Usuario {
+  id           String      @id @default(uuid()) @map("id_usuario")
+  nome         String      @db.VarChar(200)
+  email        String      @unique
+  cpf          String      @unique @db.Char(11)
+  senhaHash    String      @map("senha_hash")
+  tipo         TipoUsuario @default(ALUNO)
+  ativo        Boolean     @default(true)
+  criadoEm    DateTime    @default(now()) @map("criado_em")
+  atualizadoEm DateTime   @updatedAt @map("atualizado_em")
+
+  aluno                 Aluno?
+  professor             Professor?
+  tokens                TokenAcesso[]
+  notificacoesRecebidas Notificacao[]
+  logsAcesso            LogAcesso[]
+
+  @@map("usuarios")
+}
+
+model TokenAcesso {
+  id         String    @id @default(uuid()) @map("id_token")
+  usuarioId  String    @map("id_usuario")
+  usuario    Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  tipo       TipoToken
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(255)
+  expiraEm   DateTime  @map("expira_em")
+  revogadoEm DateTime? @map("revogado_em")
+  criadoEm   DateTime  @default(now()) @map("criado_em")
+
+  @@map("tokens_acesso")
+}
+
+model Aluno {
+  id                  String   @id @default(uuid()) @map("id_aluno")
+  usuarioId           String   @unique @map("id_usuario")
+  usuario             Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  necessidadeEspecial Boolean  @default(false) @map("necessidade_especial")
+  dataNascimento      DateTime @map("data_nascimento") @db.Date
+  criadoEm           DateTime @default(now()) @map("criado_em")
+  atualizadoEm       DateTime @updatedAt @map("atualizado_em")
+
+  turmas TurmaAluno[]
+
+  @@map("alunos")
+}
+
+model Professor {
+  id           String   @id @default(uuid()) @map("id_professor")
+  usuarioId    String   @unique @map("id_usuario")
+  usuario      Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  especialidade String?
+  criadoEm    DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  questoes Questao[]
+
+  @@map("professores")
+}
+
+model NivelEnsino {
+  id           String   @id @default(uuid()) @map("id_nivel")
+  nome         String
+  descricao    String?  @db.Text
+  ativo        Boolean  @default(true)
+  criadoEm    DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  modalidades Modalidade[]
+
+  @@map("niveis_ensino")
+}
+
+model Modalidade {
+  id           String      @id @default(uuid()) @map("id_modalidade")
+  nivelId      String      @map("id_nivel")
+  nivel        NivelEnsino @relation(fields: [nivelId], references: [id])
+  nome         String      @db.VarChar(50)
+  supletivo    Boolean     @default(false)
+  ativo        Boolean     @default(true)
+  criadoEm    DateTime    @default(now()) @map("criado_em")
+  atualizadoEm DateTime   @updatedAt @map("atualizado_em")
+
+  componentes ComponenteCurricular[]
+
+  @@map("modalidades")
+}
+
+model ComponenteCurricular {
+  id           String     @id @default(uuid()) @map("id_componente")
+  modalidadeId String     @map("id_modalidade")
+  modalidade   Modalidade @relation(fields: [modalidadeId], references: [id])
+  nome         String     @db.VarChar(100)
+  codigo       String     @db.VarChar(20)
+  ativo        Boolean    @default(true)
+  criadoEm    DateTime   @default(now()) @map("criado_em")
+  atualizadoEm DateTime  @updatedAt @map("atualizado_em")
+
+  assuntos Assunto[]
+  questoes Questao[]
+
+  @@map("componentes_curriculares")
+}
+
+model Assunto {
+  id           String               @id @default(uuid()) @map("id_assunto")
+  componenteId String               @map("id_componente")
+  componente   ComponenteCurricular @relation(fields: [componenteId], references: [id])
+  nome         String
+  ativo        Boolean              @default(true)
+  criadoEm    DateTime             @default(now()) @map("criado_em")
+  atualizadoEm DateTime            @updatedAt @map("atualizado_em")
+
+  questoes Questao[]
+
+  @@map("assuntos")
+}
+
+model Questao {
+  id              String               @id @default(uuid()) @map("id_questao")
+  professorId     String               @map("id_professor")
+  professor       Professor            @relation(fields: [professorId], references: [id])
+  componenteId    String               @map("id_componente")
+  componente      ComponenteCurricular @relation(fields: [componenteId], references: [id])
+  assuntoId       String               @map("id_assunto")
+  assunto         Assunto              @relation(fields: [assuntoId], references: [id])
+  tipo            TipoQuestao
+  dificuldade     TipoDificuldade
+  enunciado       String               @db.Text
+  urlImagem       String?              @map("url_imagem")
+  alternativas    Json
+  respostaCorreta String               @map("resposta_correta") @db.Char(1)
+  ativa           Boolean              @default(true)
+
+  @@map("questoes")
+}
+
+model Escola {
+  id           String   @id @default(uuid()) @map("id_escola")
+  nome         String
+  municipio    String
+  inep         String   @unique @db.Char(8)
+  ativo        Boolean  @default(true)
+  criadoEm    DateTime @default(now()) @map("criado_em")
+  atualizadoEm DateTime @updatedAt @map("atualizado_em")
+
+  turmas Turma[]
+
+  @@map("escolas")
+}
+
+model Turma {
+  id        String @id @default(uuid()) @map("id_turma")
+  escolaId  String @map("id_escola")
+  escola    Escola @relation(fields: [escolaId], references: [id])
+  nome      String
+  anoLetivo Int    @map("ano_letivo")
+
+  alunos TurmaAluno[]
+
+  @@map("turmas")
+}
+
+model TurmaAluno {
+  turmaId  String    @map("id_turma")
+  turma    Turma     @relation(fields: [turmaId], references: [id])
+  alunoId  String    @map("id_aluno")
+  aluno    Aluno     @relation(fields: [alunoId], references: [id])
+  entrouEm DateTime  @map("entrou_em") @db.Date
+  saiuEm   DateTime? @map("saiu_em") @db.Date
+
+  @@id([turmaId, alunoId])
+  @@map("turmas_alunos")
+}
+
+model Notificacao {
+  id             String            @id @default(uuid()) @map("id_notificacao")
+  usuarioDestId  String            @map("id_usuario_dest")
+  usuarioDest    Usuario           @relation(fields: [usuarioDestId], references: [id])
+  tipo           String
+  status         StatusNotificacao @default(PENDENTE)
+  titulo         String
+  mensagem       String
+  referenciaId   String?           @map("referencia_id")
+  referenciaTipo String?           @map("referencia_tipo")
+  lidaEm         DateTime?         @map("lida_em")
+
+  @@map("notificacoes")
+}
+
+model LogAcesso {
+  id          String          @id @default(uuid()) @map("id_log")
+  usuarioId   String?         @map("id_usuario")
+  usuario     Usuario?        @relation(fields: [usuarioId], references: [id])
+  cpfTentado  String?         @map("cpf_tentado") @db.Char(11)
+  ipOrigem    String          @map("ip_origem") @db.VarChar(45)
+  dispositivo String?         @db.Text
+  resultado   ResultadoAcesso
+  criadoEm   DateTime        @default(now()) @map("criado_em")
+
+  @@map("log_acesso")
+}

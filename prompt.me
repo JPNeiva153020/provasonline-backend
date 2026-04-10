@@ -1,0 +1,479 @@
+# Prompt — Sistema de Gestão de Provas Online (Residência de Software II)
+
+## Visão geral do sistema
+
+Plataforma web de simulados online para instituições de ensino. Professores e administradores gerenciam um banco de questões e configuram simulados que são gerados automaticamente de forma aleatória para cada aluno. Alunos realizam as provas online com tempo controlado e visualizam seus resultados após o encerramento.
+
+**Stack:** FastAPI + Prisma (prisma-client-py) + PostgreSQL + JWT
+
+**Regras absolutas de desenvolvimento:**
+- Nunca use comentários no código
+- Nunca faça nada além do que for explicitamente pedido
+
+---
+
+## Atores e papéis
+
+| Papel | Descrição |
+|---|---|
+| `ADMIN` | Gerencia todo o sistema: agendamentos, turmas, alunos, componentes, assuntos e dashboard |
+| `PROFESSOR` | Gerencia o banco de questões do seu componente curricular |
+| `ALUNO` | Autentica, realiza provas e visualiza resultados |
+
+---
+
+## Requisitos Funcionais (RF)
+
+- RF01 — Usuários separados por papel: ADMIN, PROFESSOR, ALUNO
+- RF02 — Autenticação por CPF + email (com log de tentativas de acesso)
+- RF03 — Importação de alunos via CSV pelo Administrador
+- RF04 — Restrição de acesso por IP autorizado por aluno
+- RF05 — Gerenciamento de componentes curriculares e assuntos
+- RF06 — Banco de questões por componente/assunto com nível de dificuldade (FACIL, MEDIO, DIFICIL)
+- RF07 — Cada questão possui de 4 a 5 alternativas, com exatamente 1 correta
+- RF08 — Prova gerada automaticamente de forma aleatória a partir do banco de questões, com quantidade de questões por nível de dificuldade configurável
+- RF09 — Agendamento de simulado: define turma, data/hora de início, tempo de execução e quantidade de questões por nível
+- RF10 — Separação de alunos por turma; cada turma está vinculada a um nível de ensino
+- RF11 — Suporte a modalidade supletivo (além da regular)
+- RF12 — Salvamento automático das respostas durante a realização da prova
+- RF13 — Finalização da prova ao esgotar o tempo ou por ação do aluno
+- RF14 — Gabarito e certificado liberados após a data de término da prova
+- RF15 — Dashboard em tempo real para o Administrador monitorar andamento dos simulados
+
+---
+
+## Diagrama de classes (entidades principais)
+
+### Usuario
+- id, nome, email, cpf, senha_hash
+- papel: Enum (ADMIN, PROFESSOR, ALUNO)
+- +login()
+
+### Aluno (especialização de Usuario)
+- matricula, colegio, ip_autorizado
+- +importarCSV() — importação em lote por CSV
+
+### Professor (especialização de Usuario)
+- especialidade
+
+### Nivel
+- id, nome
+- Define quais provas pertencem a ele e agrupa modalidades
+
+### Modalidade
+- id, nome (ex: Regular, Supletivo)
+- Vinculada a um Nivel
+
+### ComponenteCurricular
+- id, nome
+- +validaUnicidade()
+- Possui vários Assuntos
+
+### Assunto
+- id, nome, componente_id
+- Contém várias Questoes
+
+### Questao
+- id, enunciado, imagem_url, assunto_id
+- dificuldade: Enum (FACIL, MEDIO, DIFICIL)
+- +cadastraQuestao()
+- Possui de 4 a 5 Alternativas
+
+### Alternativa
+- id, texto, eh_correta (boolean), questao_id
+
+### Prova
+- id, data_hora_inicio, duracao_minutos, modelo_layout, ativa
+- Vinculada a um Nivel e a uma Turma
+- +gerarAutomaticamente() — sorteia questões do banco conforme as regras configuradas
+
+### RespostaAluno
+- id, aluno_id, questao_id, alternativa_id, data_hora_resposta
+- +salvamentoAutomatico()
+
+---
+
+## Fluxo: Criação de Simulado (Diagrama de Sequência)
+
+1. Professor ou Admin acessa "Gerenciamento de Provas"
+2. Define Turma, Data limite e Tempo de execução
+3. Define quantidade de questões por nível de dificuldade
+4. Sistema valida se a turma existe no banco
+5. Salva as regras e o modelo do simulado
+6. A partir disso, o sistema usa essas regras para gerar provas aleatórias individuais para cada aluno da turma
+
+---
+
+## Casos de uso por ator
+
+### Administrador
+- Agendar Provas
+- Restringir IP por aluno
+- Importar Alunos via CSV
+- Manter Componentes e Assuntos
+- Gerar Prova Automática → inclui: Gerenciar Banco de Questões
+- Monitorar Dashboard em tempo real → inclui: Salvar Respostas
+
+### Aluno
+- Autenticar Usuário
+- Realizar Prova Online → inclui: Finalizar Prova
+- Visualizar Resultado
+
+### Professor
+- Autenticar Usuário
+- Gerenciar Banco de Questões
+- Realizar Prova Online → inclui: Finalizar Prova
+
+---
+
+## Módulos a implementar (ordem sugerida)
+
+### Módulo 1 — Estrutura acadêmica
+Entidades base do sistema educacional, sem regras de negócio complexas.
+
+Rotas sugeridas:
+- `GET/POST /niveis`
+- `GET/POST /modalidades`
+- `GET/POST /componentes`
+- `GET/POST /assuntos`
+- `GET/POST /escolas`
+- `GET/POST /turmas`, `POST /turmas/{id}/alunos`
+
+---
+
+### Módulo 2 — Banco de Questões (Professor/Admin)
+Professor cadastra questões com alternativas para seu componente/assunto.
+
+Regras:
+- Cada questão deve ter entre 4 e 5 alternativas
+- Exatamente 1 alternativa deve ser marcada como correta
+- Apenas PROFESSOR e ADMIN podem criar/editar questões
+
+Rotas sugeridas:
+- `POST /questoes`
+- `GET /questoes` (filtros: componente, assunto, dificuldade)
+- `GET /questoes/{id}`
+- `PUT /questoes/{id}`
+- `DELETE /questoes/{id}`
+- `POST /questoes/{id}/alternativas`
+- `PUT /questoes/{id}/alternativas/{altId}`
+- `DELETE /questoes/{id}/alternativas/{altId}`
+
+---
+
+### Módulo 3 — Agendamento e Geração de Provas (Admin/Professor)
+Admin ou Professor configura um simulado: escolhe turma, data/hora, duração e quantas questões por nível de dificuldade. O sistema sorteia as questões do banco automaticamente.
+
+Regras:
+- O sistema valida se há questões suficientes no banco para a configuração escolhida
+- Cada aluno da turma recebe uma combinação aleatória diferente de questões
+- Uma prova agendada não pode ser editada após o início
+
+Rotas sugeridas:
+- `POST /provas` — cria o simulado com regras (turma, data, duracao, qtd por dificuldade)
+- `GET /provas`
+- `GET /provas/{id}`
+- `PUT /provas/{id}` — somente antes do início
+- `DELETE /provas/{id}` — somente antes do início
+
+---
+
+### Módulo 4 — Realização da Prova (Aluno)
+Aluno inicia a prova, responde questões com salvamento automático e finaliza.
+
+Regras:
+- Aluno só acessa provas da sua turma
+- Validação de IP autorizado antes de iniciar
+- Prova expira ao esgotar duracao_minutos desde o início
+- Salvamento automático a cada resposta
+- Não é possível alterar respostas após finalização ou expiração
+
+Rotas sugeridas:
+- `POST /provas/{id}/iniciar` — aluno inicia sua tentativa (gera as questões sorteadas)
+- `GET /provas/{id}/minha-prova` — retorna questões da tentativa do aluno autenticado
+- `POST /tentativas/{id}/respostas` — salva/atualiza resposta de uma questão
+- `POST /tentativas/{id}/finalizar` — finaliza e calcula resultado
+
+---
+
+### Módulo 5 — Resultados, Gabarito e Certificado
+Liberados somente após a data de término da prova.
+
+Rotas sugeridas:
+- `GET /tentativas/{id}/resultado` — nota e gabarito do aluno
+- `GET /provas/{id}/resultado` — consolidado para Admin/Professor (lista de alunos, notas, % acerto por questão)
+- `GET /tentativas/{id}/certificado` — geração de certificado (PDF ou dados para o frontend renderizar)
+
+---
+
+### Módulo 6 — Importação CSV de Alunos (Admin)
+Admin faz upload de um CSV com dados dos alunos. O sistema cria as contas e matricula na turma indicada.
+
+Formato esperado do CSV: `nome,email,cpf,matricula,colegio,turma_id`
+
+Rota:
+- `POST /alunos/importar` — multipart/form-data com o arquivo CSV
+
+---
+
+### Módulo 7 — Dashboard (Admin)
+Visão em tempo real do andamento dos simulados ativos.
+
+Rotas sugeridas:
+- `GET /dashboard/simulados-ativos` — provas em andamento com contagem de alunos iniciados/finalizados
+- `GET /dashboard/prova/{id}` — detalhe de uma prova em tempo real
+
+---
+
+## Arquitetura do sistema (visão completa)
+
+### BACKEND — Python/FastAPI
+
+Organizado em módulos funcionais internos:
+
+**Módulo: Banco de Questões**
+- CRUD de questões por componente/assunto
+
+**Módulo: Correção Automática**
+- Seleciona as notas das respostas submetidas
+- Calcula e armazena o resultado final do aluno
+
+**Módulo: Relatórios & Dashboards**
+- Consolida provas aprovadas com dados do aluno
+- Expõe dados para o frontend em tempo real
+
+**Módulo: Duração da Prova**
+- Controla tempo de execução por prova/turma
+- Configura as partes e materiais do simulado
+
+**Módulo: Gestão de Alunos**
+- Background jobs para processamento de dados
+- Gera e distribui provas, armazena resultados
+
+**Módulo: Importação Acadêmica**
+- Recebe arquivo CSV
+- Valida via job assíncrono
+- Salva turmas e alunos no banco
+
+**Módulo: Aplicação & Monitoramento**
+- Inicia sessão da prova
+- Auto-save a cada 30 segundos
+- Finaliza e submete prova ao encerrar
+
+**Módulo: Certificação Acadêmica** (fluxo de decisão)
+1. Aluno concluiu a disciplina?
+2. Nota ≥ 7?
+3. Número de tentativas > 3?
+4. Se todas as disciplinas concluídas → Gerar Certificado
+5. Caso contrário → Área de priorização / nova tentativa
+6. Se reprovado → Invalida/Reprova na prova
+
+---
+
+### PERSISTÊNCIA — PostgreSQL
+
+Bancos de dados separados por domínio:
+- **Banco de Questões** — questões, alternativas, assuntos, componentes
+- **Certificações & Notas** — resultados, certificados emitidos
+- **Provas & Notas** — simulados, tentativas, respostas
+- **Usuários & Notas** — usuarios, alunos, professores, turmas
+- **Respostas** — respostas individuais por tentativa
+- **Logs de Operações** — log_acesso, auditoria
+
+---
+
+### SERVIÇOS AUXILIARES
+
+**Filas (jobs assíncronos):**
+- Fila de envio de trabalhos (importação CSV)
+- Fila de progresso (andamento em tempo real)
+- Fila de notificações
+
+**Tarefas agendadas:**
+- Corrigir questões em background
+- Calcular e armazenar notas
+- Visualização agregada de dados
+
+**Validações:**
+- Certificação: verifica critérios de aprovação
+- Módulo leader de DK (controle de acesso por %)
+- Tempo final: expira provas ao atingir o limite
+
+**Notificações:**
+- Servidor de progresso em tempo real (WebSocket)
+- Monitoramento de sessões ativas
+
+---
+
+### FRONTEND — React + TypeScript + TailwindCSS
+
+Três portais distintos:
+
+**Portal do Aluno:**
+- Visualização de provas disponíveis
+- Realização do simulado
+- Resultados e certificados
+
+**Portal do Professor:**
+- Fila de questões para revisão
+- Banco de questões (cadastro e edição)
+- Turmas e notas
+
+**Dashboard Admin:**
+- Resultado e monitoramento em tempo real
+- Progresso por aluno/turma
+- Relatórios e simulados
+
+---
+
+### SERVIDOR DE AUTENTICAÇÃO
+
+- Gateway: JWT + IP + Dispositivo (validação combinada)
+- Redis: controle de sessão (tokens ativos, revogação rápida)
+- Comunicação via JWT + IP + Dispositivo entre frontend e backend
+
+---
+
+### ROTAS PRINCIPAIS DA API
+
+| Prefixo | Domínio |
+|---|---|
+| `/rotinas` | Tarefas agendadas e jobs |
+| `/questoes` | Banco de questões |
+| `/alunos` | Gestão de alunos |
+| `/relat` | Relatórios |
+| `/agexport` | Agendamento e exportação |
+| `/cert` | Certificados |
+| `/aplicacoes` | Aplicação/realização de provas |
+
+---
+
+## Contrato de API (endpoints documentados)
+
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/api/auth/login` | Login independente de cargo. Body: `{cpf, password}`. Retorna `accessToken` ou 204 com erro |
+| POST | `/api/auth/me` | Retorna dados do usuário logado: `{nome, email, matricula}` |
+| GET | `/api/provas/{id}/status` | Status da prova em andamento ou finalizada: `{time, teacher, createdBy, CREATED_AT, FINISHED_AT}` |
+| GET | `/api/provas/{id}/resultados` | Resultados individuais de cada aluno após finalização da prova |
+| GET | `/api/provas/{id}/players` | Detalhes de cada usuário que realizou a prova: `[{id, userId, addedBy, CREATED_AT}]` |
+| POST | `/api/provas/questoes` | Cadastra questão: `{enunciado, componente_id, assunto_id, dificuldade, alternativas: ["A","B","C","D"]}` |
+| POST | `/api/provas/gerar` | Geração automática de prova: `{total_questoes, componente_id, dificuldade_mix}`. Retorna `{test_id, status: "gerado"}` |
+| POST | `/api/import/alunos` | Importação CSV/Excel de alunos. Retorna `{total_processados}` ou 404 em falha |
+| GET | `/api/certificacoes/{id}/` | Histórico de certificações do usuário: `{prova_id, percentual, emitido_em}` |
+
+Rotas adicionais identificadas no fluxograma:
+- `POST /provas/{id}/responder` — salva resposta individual (auto-save por clique)
+- `POST /provas/{id}/finalizar` — encerra a prova e processa correção automática
+- `GET /provas/{id}/acessar` — valida IP e dispositivo do aluno antes de liberar acesso
+- `POST /provas/{id}/agendar` — agendamento digital da prova para uma escola/turma
+
+---
+
+## Personas (contexto da SEED-SE — Secretaria de Educação de Sergipe)
+
+### Ricardo Menezes — Coordenador de Avaliação
+- 45 anos, Aracaju-SE, Pós-graduado em Gestão Pública
+- **Metas:** integridade das avaliações estaduais, redução de custos logísticos, modernização da rede de ensino
+- **Dores:** vazamento de provas, falta de visibilidade em tempo real nas escolas, recebimento tardio de resultados
+- **Necessidades técnicas do backend:**
+  - Dashboard em tempo real (contagem de alunos logados e realizando a prova)
+  - Validação de IP por requisição (acesso autorizado por escola)
+  - APIs de exportação de dados segmentados por escola e disciplina
+
+### Lucas Silva — Aluno (Usuário Final)
+- 17 anos, Aracaju-SE, 3º ano do Ensino Médio
+- **Metas:** realizar provas sem falhas técnicas, receber feedback instantâneo, ter certeza de que respostas foram salvas
+- **Dores:** insegurança sobre estabilidade da internet escolar, ansiedade pela espera de notas, lentidão em hardware antigo
+- **Necessidades técnicas do backend:**
+  - Salvamento automático de respostas em tempo real (persistência por clique)
+  - Correção e exibição imediata de resultados ao finalizar
+  - API otimizada para conexões de baixa largura de banda
+
+### Ana Paula Santos — Professora e Elaboradora
+- 38 anos, Aracaju-SE, Graduada em Pedagogia e Letras
+- **Metas:** equilíbrio pedagógico das avaliações, otimização do tempo de montagem, banco organizado
+- **Dores:** retrabalho para encontrar questões antigas, horas perdidas escolhendo questões manualmente
+- **Necessidades técnicas do backend:**
+  - Banco de questões com filtros: componente, assunto, dificuldade
+  - Algoritmo de sorteio automático por critério (ex: "10 de Geometria, Médio")
+  - API robusta para upload de imagens e gráficos vinculados aos enunciados
+
+### Jorge Oliveira — Coordenador de Logística
+- 53 anos, Aracaju-SE, Graduado em Administração de Empresas
+- **Metas:** entrega pontual de provas nos 75 municípios de Sergipe, reduzir erros de triagem, eliminar material físico
+- **Dores:** "caos operacional" na semana da prova, burocracia com protocolos físicos, incerteza no transporte
+- **Necessidades técnicas do backend:**
+  - Dashboard de status de distribuição em tempo real
+  - Protocolos digitais de recebimento (assinatura digital)
+  - Criptografia e controle de acesso por dados autorizados
+
+---
+
+## Critérios de Aceitação por história de usuário
+
+### Ricardo Menezes
+- **Segurança por IP:** validar o IP em cada requisição de acesso à prova; bloquear se o IP não pertencer a uma escola autorizada
+- **Telemetria em Tempo Real:** endpoint de dashboard retorna número exato de alunos logados e realizando a prova simultaneamente
+- **Exportação de Relatórios:** APIs de geração e exportação de dados consolidados de desempenho segmentados por escola e por disciplina
+
+### Jorge Oliveira
+- **Importação Robusta:** processar arquivos CSV de até 10.000 registros em no máximo 5 minutos (processamento assíncrono)
+- **Exclusividade de Etapa:** impedir inscrição em nova etapa se o aluno já possuir inscrição ativa ou pendente de conclusão
+- **Validação de Vagas:** no agendamento, validar se a escola ainda possui vagas; bloquear novos registros se capacidade atingida
+- **Relatório de Carga:** listar etapas com total de alunos inscritos versus capacidade total da rede
+
+### Ana Paula Santos
+- **Organização do Banco:** filtros por componente curricular, assunto e dificuldade (FACIL, MEDIO, DIFICIL)
+- **Algoritmo de Geração Automática:** sortear questões com base em critérios específicos (ex: "10 questões de Matemática sobre Geometria, nível Médio")
+- **Suporte Multimídia:** armazenar e exibir imagens e gráficos vinculados aos enunciados das questões
+
+### Lucas Silva
+- **Persistência Automática (Auto-save):** persistir cada resposta individual no momento exato em que o aluno seleciona uma alternativa (resiliência contra quedas de conexão)
+- **Feedback Instantâneo:** processar correção automática e retornar nota e gabarito imediatamente após finalização
+- **Otimização de Performance:** manter tempos de resposta baixos; sem travamentos ou latência perceptível entre questões
+
+---
+
+## Fluxo completo do sistema (por persona)
+
+### Gestão Pedagógica (Ana Paula)
+1. Acessa módulo de questões → `POST /questoes`
+2. Anexa imagens aos enunciados via API de upload
+3. Define critérios de sorteio → `POST /provas/gerar` (algoritmo seleciona questões automaticamente)
+4. Classifica por componente, assunto e dificuldade (Refinamento por Tags)
+5. Revisa e libera prova para agendamento
+
+### Gestão de Logística (Jorge)
+1. Importa CSV massivo de alunos → `POST /alunos/importar` (assíncrono, 10k registros em background)
+2. Monitora status da importação em segundo plano
+3. Acompanha escolas com prova "distribuída" via dashboard
+4. Valida agendamento digital → `POST /provas/{id}/agendar` (substitui entrega física)
+
+### Execução e Resiliência (Lucas)
+1. Login → JWT retorna rotas disponíveis para o papel ALUNO
+2. Tenta entrar na prova → `GET /provas/{id}/acessar` (valida IP e dispositivo)
+3. Inicia prova; cada alternativa marcada → `POST /provas/{id}/responder` (auto-save)
+4. Visualiza timer da prova em tempo real
+5. Clica em Finalizar → `POST /provas/{id}/finalizar`
+6. Recebe percentual de acertos e erros imediatamente
+
+### Gestão Estratégica (Ricardo)
+1. Acessa `GET /provas/{id}/status` → dashboard de telemetria em tempo real
+2. Audita restrições de IP (`GET /provas/{id}/acessar`)
+3. Após término → `GET /provas/{id}/resultados` (resultados agregados por escola e disciplina)
+4. Exporta dados para tomada de decisão pedagógica na Secretaria
+
+---
+
+## Estado atual do projeto
+
+Já implementado:
+- `Usuario` com roles `ADMIN`, `PROFESSOR`, `ALUNO`
+- `TokenAcesso` com hash do token, tipo (ACCESS/REFRESH) e revogação
+- CRUD completo de usuários em `/usuarios`
+- Auth em `/auth/login` e `/auth/logout`
+- `get_current_user` em `src/dependencies.py`
+- Schema Prisma completo com todos os modelos mapeados do Figma
+
+Ao implementar os próximos módulos, reutilize `get_current_user` e verifique `usuario.tipo` para aplicar as restrições de acesso por papel.
