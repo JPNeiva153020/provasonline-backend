@@ -10,6 +10,7 @@ from src.database import connect, disconnect
 from src.routers.alunos import router as alunos_router
 from src.routers.auth import limiter as auth_limiter
 from src.routers.auth import router as auth_router
+from src.routers.catalogo import router as catalogo_router
 from src.routers.turmas import router as turmas_router
 from src.routers.usuarios import router as usuarios_router
 
@@ -34,7 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="Seed Backend — Residência de Software II",
-    version="1.2.0",
+    version="1.3.0",
     lifespan=lifespan,
 )
 
@@ -54,6 +55,7 @@ app.include_router(auth_router)
 app.include_router(usuarios_router)
 app.include_router(turmas_router)
 app.include_router(alunos_router)
+app.include_router(catalogo_router)
 
 
 @app.get("/", tags=["Health"])
