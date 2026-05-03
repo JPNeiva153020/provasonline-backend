@@ -7,8 +7,10 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from src.database import connect, disconnect
+from src.routers.alunos import router as alunos_router
 from src.routers.auth import limiter as auth_limiter
 from src.routers.auth import router as auth_router
+from src.routers.turmas import router as turmas_router
 from src.routers.usuarios import router as usuarios_router
 
 
@@ -32,7 +34,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="Seed Backend — Residência de Software II",
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan,
 )
 
@@ -50,6 +52,8 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(usuarios_router)
+app.include_router(turmas_router)
+app.include_router(alunos_router)
 
 
 @app.get("/", tags=["Health"])

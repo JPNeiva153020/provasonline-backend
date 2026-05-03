@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -70,3 +70,73 @@ class TrocarSenhaRequest(BaseModel):
 class TrocarSenhaResponse(BaseModel):
     sucesso: bool = True
     mensagem: str = "Senha alterada com sucesso"
+
+
+class TurmaCreate(BaseModel):
+    nome: str = Field(min_length=1, max_length=50)
+    anoLetivo: int = Field(ge=2024, le=2030)
+    escolaId: str = Field(min_length=1)
+    modalidadeId: str = Field(min_length=1)
+
+
+class EscolaResumo(BaseModel):
+    id: str
+    nome: str
+
+    class Config:
+        from_attributes = True
+
+
+class ModalidadeResumo(BaseModel):
+    id: str
+    nome: str
+
+    class Config:
+        from_attributes = True
+
+
+class TurmaResponse(BaseModel):
+    id: str
+    nome: str
+    anoLetivo: int
+    escola: EscolaResumo
+    modalidade: ModalidadeResumo
+    totalAlunos: int = 0
+
+
+class AlunoCreate(BaseModel):
+    nome: str = Field(min_length=2, max_length=200)
+    email: EmailStr | None = None
+    cpf: str = Field(pattern=r"^\d{11}$")
+    dataNascimento: date
+    necessidadeEspecial: bool = False
+    turmaId: str | None = None
+
+    @field_validator("dataNascimento")
+    @classmethod
+    def validar_data_nao_futura(cls, v: date) -> date:
+        if v > date.today():
+            raise ValueError("Data de nascimento não pode estar no futuro")
+        return v
+
+
+class AlunoCreateResponse(BaseModel):
+    id: str
+    usuarioId: str
+    nome: str
+    cpf: str
+    email: str | None = None
+    senhaProvisoria: str
+    dataNascimento: date
+    turmaId: str | None = None
+
+
+class AlunoListItem(BaseModel):
+    id: str
+    nome: str
+    cpf: str
+    email: str | None = None
+    dataNascimento: date
+    necessidadeEspecial: bool
+    turmaNome: str | None = None
+    escolaNome: str | None = None
