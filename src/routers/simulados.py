@@ -96,11 +96,19 @@ async def criar_simulado(data: SimuladoCreate, _=Depends(require_admin)):
             detail=" · ".join(faltas),
         )
 
+    professor_demo = await db.professor.find_first()
+    if not professor_demo:
+        raise HTTPException(
+            status_code=500,
+            detail="Nenhum professor cadastrado no sistema. Rode seed_catalogo.py.",
+        )
+
     novo = await db.simulado.create(
         data={
             "titulo": data.titulo,
             "descricao": data.descricao,
-            "componenteId": data.componenteId,
+            "componente": {"connect": {"id": data.componenteId}},
+            "professor": {"connect": {"id": professor_demo.id}},
             "qtdFacil": data.qtdFacil,
             "qtdMedio": data.qtdMedio,
             "qtdDificil": data.qtdDificil,

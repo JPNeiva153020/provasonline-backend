@@ -1,7 +1,7 @@
 import asyncio
 import sys
 
-from prisma import Prisma
+from prisma import Json, Prisma
 from prisma.errors import PrismaError
 
 
@@ -704,20 +704,20 @@ async def upsert_questao(db: Prisma, dados: dict, professor_id: str) -> tuple[bo
     if existente:
         return (True, "já existia")
 
-    alternativas_json = [
+    alternativas_lista = [
         {"letra": letra, "texto": texto} for letra, texto in dados["alternativas"]
     ]
 
     try:
         await db.questao.create(
             data={
-                "professorId": professor_id,
-                "componenteId": componente.id,
-                "assuntoId": assunto.id,
+                "professor": {"connect": {"id": professor_id}},
+                "componente": {"connect": {"id": componente.id}},
+                "assunto": {"connect": {"id": assunto.id}},
                 "tipo": "MULTIPLA_ESCOLHA",
                 "dificuldade": dados["dificuldade"],
                 "enunciado": dados["enunciado"],
-                "alternativas": alternativas_json,
+                "alternativas": Json(alternativas_lista),
                 "respostaCorreta": dados["respostaCorreta"],
                 "ativa": True,
             }

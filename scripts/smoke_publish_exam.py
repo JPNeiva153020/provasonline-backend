@@ -78,7 +78,12 @@ async def main() -> int:
             )
 
             componente_matematica = next(
-                (c for c in componentes if c["nome"] == "Matemática"),
+                (
+                    c for c in componentes
+                    if c["nome"] == "Matemática"
+                    and "Médio" in c["modalidade"]["nome"]
+                    and "Regular" in c["modalidade"]["nome"]
+                ),
                 None,
             )
             if not componente_matematica:
