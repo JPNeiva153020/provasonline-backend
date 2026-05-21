@@ -16,6 +16,12 @@ class DificuldadeQuestao(str, Enum):
     DIFICIL = "DIFICIL"
 
 
+class StatusResultado(str, Enum):
+    EM_ANDAMENTO = "EM_ANDAMENTO"
+    FINALIZADO = "FINALIZADO"
+    EXPIRADO = "EXPIRADO"
+
+
 class UsuarioCreate(BaseModel):
     nome: str
     email: EmailStr | None = None
@@ -173,14 +179,11 @@ class SimuladoCreate(BaseModel):
     def validar_regras_compostas(self):
         if self.qtdFacil + self.qtdMedio + self.qtdDificil < 1:
             raise ValueError("Total de questões deve ser pelo menos 1")
-
         if self.janelaInicio >= self.janelaFim:
             raise ValueError("Início da janela deve ser anterior ao fim")
-
         agora = datetime.now(self.janelaInicio.tzinfo)
         if self.janelaInicio <= agora:
             raise ValueError("Início da janela deve estar no futuro")
-
         return self
 
 
@@ -206,3 +209,65 @@ class DisponibilidadeQuestoes(BaseModel):
     facil: int
     medio: int
     dificil: int
+
+
+class AlternativaParaAluno(BaseModel):
+    letra: str
+    texto: str
+
+
+class QuestaoParaAluno(BaseModel):
+    ordem: int
+    questaoId: str
+    enunciado: str
+    alternativas: list[AlternativaParaAluno]
+    respostaSalva: str | None = None
+
+
+class IniciarProvaResponse(BaseModel):
+    resultadoId: str
+    iniciadoEm: datetime
+    expiraEm: datetime
+    duracaoMinutos: int
+    totalQuestoes: int
+    questoes: list[QuestaoParaAluno]
+
+
+class RespostaItem(BaseModel):
+    questaoId: str
+    resposta: str = Field(pattern=r"^[ABCDabcd]$")
+
+
+class AutoSaveRequest(BaseModel):
+    respostas: list[RespostaItem] = Field(min_length=1)
+
+
+class AutoSaveResponse(BaseModel):
+    salvo: bool
+    totalSalvas: int
+    salvoEm: datetime
+
+
+class GabaritoItem(BaseModel):
+    ordem: int
+    questaoId: str
+    respostaAluno: str | None
+    respostaCorreta: str
+    correta: bool
+
+
+class SimuladoResumoResultado(BaseModel):
+    titulo: str
+    componente: str
+    duracaoMinutos: int
+
+
+class ResultadoResponse(BaseModel):
+    resultadoId: str
+    pontuacao: float
+    acertos: int
+    total: int
+    statusResultado: StatusResultado
+    finalizadoEm: datetime
+    simulado: SimuladoResumoResultado
+    gabarito: list[GabaritoItem]
