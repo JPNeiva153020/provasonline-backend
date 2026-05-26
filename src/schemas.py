@@ -256,18 +256,19 @@ class AutoSaveResponse(BaseModel):
     salvoEm: datetime
 
 
-class GabaritoItem(BaseModel):
-    ordem: int
-    questaoId: str
-    respostaAluno: str | None
-    respostaCorreta: str
-    correta: bool
-
-
 class SimuladoResumoResultado(BaseModel):
     titulo: str
     componente: str
     duracaoMinutos: int
+
+
+class GabaritoItemDetalhado(BaseModel):
+    ordem: int
+    questaoId: str
+    enunciado: str
+    alternativaMarcada: str | None
+    alternativaCorreta: str
+    correta: bool
 
 
 class ResultadoResponse(BaseModel):
@@ -278,7 +279,23 @@ class ResultadoResponse(BaseModel):
     statusResultado: StatusResultado
     finalizadoEm: datetime
     simulado: SimuladoResumoResultado
-    gabarito: list[GabaritoItem]
+    gabaritoDisponivel: bool
+    gabaritoDisponivelEm: datetime
+    gabarito: list[GabaritoItemDetalhado] | None = None
+
+
+class HistoricoItem(BaseModel):
+    resultadoId: str
+    simuladoId: str
+    titulo: str
+    componente: str
+    pontuacao: float | None
+    acertos: int | None
+    total: int
+    statusResultado: StatusResultado
+    finalizadoEm: datetime | None
+    gabaritoDisponivel: bool
+    gabaritoDisponivelEm: datetime
 
 
 class ComponenteEtapaResumo(BaseModel):

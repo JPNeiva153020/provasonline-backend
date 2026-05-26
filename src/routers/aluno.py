@@ -8,7 +8,8 @@ from src.schemas import (
     AutoSaveRequest,
     AutoSaveResponse,
     EtapaDisponivelResponse,
-    GabaritoItem,
+    GabaritoItemDetalhado,
+    HistoricoItem,
     IniciarProvaResponse,
     QuestaoParaAluno,
     AlternativaParaAluno,
@@ -40,6 +41,61 @@ async def _buscar_aluno_do_usuario(usuario_id: str):
     if not aluno:
         raise HTTPException(status_code=404, detail="Aluno não encontrado")
     return aluno
+
+
+def _texto_alternativa(alternativas: list, letra: str | None) -> str | None:
+    if not letra or not isinstance(alternativas, list):
+        return None
+    for alt in alternativas:
+        if isinstance(alt, dict) and alt.get("letra", "").upper() == letra.upper():
+            return alt.get("texto", "")
+    return None
+
+
+def _montar_gabarito(tentativas_questoes: list) -> list[GabaritoItemDetalhado]:
+    gabarito: list[GabaritoItemDetalhado] = []
+    for tq in sorted(tentativas_questoes, key=lambda x: x.ordem):
+        alternativas = tq.questao.alternativas if isinstance(tq.questao.alternativas, list) else []
+        resposta_correta = tq.questao.respostaCorreta.upper()
+        resposta_aluno = tq.alternativaMarcada.upper() if tq.alternativaMarcada else None
+        gabarito.append(GabaritoItemDetalhado(
+            ordem=tq.ordem,
+            questaoId=tq.questaoId,
+            enunciado=tq.questao.enunciado,
+            alternativaMarcada=_texto_alternativa(alternativas, resposta_aluno),
+            alternativaCorreta=_texto_alternativa(alternativas, resposta_correta) or resposta_correta,
+            correta=resposta_aluno == resposta_correta,
+        ))
+    return gabarito
+
+
+def _contar_acertos(tentativas_questoes: list) -> int:
+    return sum(
+        1 for tq in tentativas_questoes
+        if tq.alternativaMarcada and tq.alternativaMarcada.upper() == tq.questao.respostaCorreta.upper()
+    )
+
+
+async def _notificar_gabarito_disponivel(usuario_id: str, resultado_id: str, titulo_simulado: str) -> None:
+    existente = await db.notificacao.find_first(
+        where={
+            "usuarioDestId": usuario_id,
+            "referenciaId": resultado_id,
+            "referenciaTipo": "resultado",
+        }
+    )
+    if not existente:
+        await db.notificacao.create(
+            data={
+                "usuarioDest": {"connect": {"id": usuario_id}},
+                "tipo": "gabarito_disponivel",
+                "titulo": "Gabarito disponível",
+                "mensagem": f"O gabarito da etapa '{titulo_simulado}' já está disponível para consulta.",
+                "referenciaId": resultado_id,
+                "referenciaTipo": "resultado",
+                "status": "PENDENTE",
+            }
+        )
 
 
 @router.get("/etapas-disponiveis", response_model=list[EtapaDisponivelResponse])
@@ -311,25 +367,7 @@ async def submeter_prova(resultado_id: str, usuario=Depends(get_current_user)):
     expira_em = _aware(resultado.iniciadoEm) + timedelta(minutes=resultado.simulado.duracaoMinutos)
     status_final = "EXPIRADO" if agora > expira_em else "FINALIZADO"
 
-    acertos = 0
-    gabarito: list[GabaritoItem] = []
-
-    for tq in sorted(resultado.tentativasQuestoes, key=lambda x: x.ordem):
-        resposta_correta = tq.questao.respostaCorreta.upper()
-        resposta_aluno = tq.alternativaMarcada.upper() if tq.alternativaMarcada else None
-        correta = resposta_aluno == resposta_correta
-
-        if correta:
-            acertos += 1
-
-        gabarito.append(GabaritoItem(
-            ordem=tq.ordem,
-            questaoId=tq.questaoId,
-            respostaAluno=resposta_aluno,
-            respostaCorreta=resposta_correta,
-            correta=correta,
-        ))
-
+    acertos = _contar_acertos(resultado.tentativasQuestoes)
     total = len(resultado.tentativasQuestoes)
     pontuacao = round(acertos / total * 10, 1) if total > 0 else 0.0
 
@@ -341,6 +379,8 @@ async def submeter_prova(resultado_id: str, usuario=Depends(get_current_user)):
             "finalizadoEm": agora,
         },
     )
+
+    janela_fim = _aware(resultado.simulado.janelaFim)
 
     return ResultadoResponse(
         resultadoId=resultado_id,
@@ -354,7 +394,9 @@ async def submeter_prova(resultado_id: str, usuario=Depends(get_current_user)):
             componente=resultado.simulado.componente.nome,
             duracaoMinutos=resultado.simulado.duracaoMinutos,
         ),
-        gabarito=gabarito,
+        gabaritoDisponivel=False,
+        gabaritoDisponivelEm=janela_fim,
+        gabarito=None,
     )
 
 
@@ -378,26 +420,19 @@ async def ver_resultado(resultado_id: str, usuario=Depends(get_current_user)):
     if resultado.statusResultado not in ("FINALIZADO", "EXPIRADO"):
         raise HTTPException(status_code=422, detail="Resultado ainda não disponível")
 
-    acertos = 0
-    gabarito: list[GabaritoItem] = []
-
-    for tq in sorted(resultado.tentativasQuestoes, key=lambda x: x.ordem):
-        resposta_correta = tq.questao.respostaCorreta.upper()
-        resposta_aluno = tq.alternativaMarcada.upper() if tq.alternativaMarcada else None
-        correta = resposta_aluno == resposta_correta
-
-        if correta:
-            acertos += 1
-
-        gabarito.append(GabaritoItem(
-            ordem=tq.ordem,
-            questaoId=tq.questaoId,
-            respostaAluno=resposta_aluno,
-            respostaCorreta=resposta_correta,
-            correta=correta,
-        ))
-
+    agora = _agora()
+    janela_fim = _aware(resultado.simulado.janelaFim)
+    acertos = _contar_acertos(resultado.tentativasQuestoes)
     total = len(resultado.tentativasQuestoes)
+
+    gabarito_disponivel = usuario.tipo != "ALUNO" or agora >= janela_fim
+
+    if gabarito_disponivel and usuario.tipo == "ALUNO":
+        await _notificar_gabarito_disponivel(
+            usuario_id=usuario.id,
+            resultado_id=resultado_id,
+            titulo_simulado=resultado.simulado.titulo,
+        )
 
     return ResultadoResponse(
         resultadoId=resultado_id,
@@ -411,5 +446,52 @@ async def ver_resultado(resultado_id: str, usuario=Depends(get_current_user)):
             componente=resultado.simulado.componente.nome,
             duracaoMinutos=resultado.simulado.duracaoMinutos,
         ),
-        gabarito=gabarito,
+        gabaritoDisponivel=gabarito_disponivel,
+        gabaritoDisponivelEm=janela_fim,
+        gabarito=_montar_gabarito(resultado.tentativasQuestoes) if gabarito_disponivel else None,
     )
+
+
+@router.get("/historico", response_model=list[HistoricoItem])
+async def historico(usuario=Depends(get_current_user)):
+    _require_aluno(usuario)
+    aluno = await _buscar_aluno_do_usuario(usuario.id)
+
+    resultados = await db.resultadoaluno.find_many(
+        where={
+            "alunoId": aluno.id,
+            "statusResultado": {"in": ["FINALIZADO", "EXPIRADO"]},
+        },
+        include={
+            "simulado": {"include": {"componente": True}},
+            "tentativasQuestoes": True,
+        },
+        order={"finalizadoEm": "desc"},
+    )
+
+    agora = _agora()
+    historico_items: list[HistoricoItem] = []
+
+    for r in resultados:
+        acertos = sum(
+            1 for tq in r.tentativasQuestoes
+            if tq.alternativaMarcada and tq.alternativaMarcada.upper() == tq.questao.respostaCorreta.upper()
+        ) if hasattr(r.tentativasQuestoes[0], "questao") and r.tentativasQuestoes else None
+
+        janela_fim = _aware(r.simulado.janelaFim)
+
+        historico_items.append(HistoricoItem(
+            resultadoId=r.id,
+            simuladoId=r.simuladoId,
+            titulo=r.simulado.titulo,
+            componente=r.simulado.componente.nome,
+            pontuacao=r.pontuacao,
+            acertos=acertos,
+            total=len(r.tentativasQuestoes),
+            statusResultado=StatusResultado(r.statusResultado),
+            finalizadoEm=r.finalizadoEm,
+            gabaritoDisponivel=agora >= janela_fim,
+            gabaritoDisponivelEm=janela_fim,
+        ))
+
+    return historico_items
