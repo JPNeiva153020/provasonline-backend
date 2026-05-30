@@ -181,6 +181,7 @@ class SimuladoCreate(BaseModel):
     janelaInicio: datetime
     janelaFim: datetime
     turmaIds: list[str] = []
+    embaralharAlternativas: bool = False
 
     @model_validator(mode="after")
     def validar_regras_compostas(self):
@@ -192,6 +193,13 @@ class SimuladoCreate(BaseModel):
         if self.janelaInicio <= agora:
             raise ValueError("Início da janela deve estar no futuro")
         return self
+
+
+class GeracaoRapidaCreate(BaseModel):
+    componenteId: str = Field(min_length=1)
+    duracaoMinutos: int = Field(ge=15, le=240, default=90)
+    turmaIds: list[str] = []
+    vagas: int = Field(ge=1, le=10000, default=100)
 
 
 class SimuladoResponse(BaseModel):
@@ -210,6 +218,7 @@ class SimuladoResponse(BaseModel):
     status: str
     criadoEm: datetime
     turmas: list[TurmaResumoSimples] = []
+    embaralharAlternativas: bool = False
 
 
 class DisponibilidadeQuestoes(BaseModel):
