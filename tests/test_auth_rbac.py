@@ -1,15 +1,18 @@
 import pytest
 
+from src.security import decode_token
+
 
 @pytest.mark.asyncio
-async def test_login_admin_retorna_token_e_role(client):
+async def test_login_admin_retorna_token_com_role_no_jwt(client):
     resp = await client.post(
         "/auth/login", json={"cpf": "12345678909", "senha": "admin123"}
     )
     assert resp.status_code == 200
     corpo = resp.json()
-    assert corpo["role"] == "ADMIN"
     assert "access_token" in corpo
+    payload = decode_token(corpo["access_token"])
+    assert payload["role"] == "ADMIN"
 
 
 @pytest.mark.asyncio
