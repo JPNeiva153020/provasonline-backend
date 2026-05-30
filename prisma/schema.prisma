@@ -270,26 +270,27 @@ model FaixaSerie {
 }
 
 model Simulado {
-  id             String               @id @default(uuid()) @map("id_simulado")
-  professorId    String               @map("id_professor")
-  professor      Professor            @relation(fields: [professorId], references: [id])
-  componenteId   String               @map("id_componente")
-  componente     ComponenteCurricular @relation(fields: [componenteId], references: [id])
-  faixaId        String?              @map("id_faixa")
-  faixa          FaixaSerie?          @relation(fields: [faixaId], references: [id])
-  titulo         String               @db.VarChar(200)
-  descricao      String?              @db.Text
-  tipo           TipoSimulado         @default(SIMULADO)
-  status         StatusSimulado       @default(RASCUNHO)
-  qtdFacil       Int                  @default(0) @map("qtd_facil")
-  qtdMedio       Int                  @default(0) @map("qtd_medio")
-  qtdDificil     Int                  @default(0) @map("qtd_dificil")
-  vagas          Int
-  duracaoMinutos Int                  @map("duracao_minutos")
-  janelaInicio   DateTime             @map("janela_inicio")
-  janelaFim      DateTime             @map("janela_fim")
-  criadoEm       DateTime             @default(now()) @map("criado_em")
-  atualizadoEm   DateTime             @updatedAt @map("atualizado_em")
+  id                   String               @id @default(uuid()) @map("id_simulado")
+  professorId          String               @map("id_professor")
+  professor            Professor            @relation(fields: [professorId], references: [id])
+  componenteId         String               @map("id_componente")
+  componente           ComponenteCurricular @relation(fields: [componenteId], references: [id])
+  faixaId              String?              @map("id_faixa")
+  faixa                FaixaSerie?          @relation(fields: [faixaId], references: [id])
+  titulo               String               @db.VarChar(200)
+  descricao            String?              @db.Text
+  tipo                 TipoSimulado         @default(SIMULADO)
+  status               StatusSimulado       @default(RASCUNHO)
+  qtdFacil             Int                  @default(0) @map("qtd_facil")
+  qtdMedio             Int                  @default(0) @map("qtd_medio")
+  qtdDificil           Int                  @default(0) @map("qtd_dificil")
+  vagas                Int
+  duracaoMinutos       Int                  @map("duracao_minutos")
+  janelaInicio         DateTime             @map("janela_inicio")
+  janelaFim            DateTime             @map("janela_fim")
+  embaralharAlternativas Boolean            @default(false) @map("embaralhar_alternativas")
+  criadoEm             DateTime             @default(now()) @map("criado_em")
+  atualizadoEm         DateTime             @updatedAt @map("atualizado_em")
 
   aplicacoes Aplicacao[]
   resultados ResultadoAluno[]
@@ -332,13 +333,14 @@ model ResultadoAluno {
 }
 
 model TentativaQuestao {
-  resultadoId        String         @map("id_resultado")
-  resultado          ResultadoAluno @relation(fields: [resultadoId], references: [id], onDelete: Cascade)
-  questaoId          String         @map("id_questao")
-  questao            Questao        @relation(fields: [questaoId], references: [id])
-  ordem              Int
-  alternativaMarcada String?        @map("alternativa_marcada") @db.Char(1)
-  respondidoEm       DateTime?      @map("respondido_em")
+  resultadoId              String         @map("id_resultado")
+  resultado                ResultadoAluno @relation(fields: [resultadoId], references: [id], onDelete: Cascade)
+  questaoId                String         @map("id_questao")
+  questao                  Questao        @relation(fields: [questaoId], references: [id])
+  ordem                    Int
+  alternativaMarcada       String?        @map("alternativa_marcada") @db.Char(1)
+  alternativasEmbaralhadas Json?          @map("alternativas_embaralhadas")
+  respondidoEm             DateTime?      @map("respondido_em")
 
   @@id([resultadoId, questaoId])
   @@map("tentativa_questoes")

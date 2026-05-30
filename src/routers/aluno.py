@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from prisma import Json
 
 from src.database import db
 from src.dependencies import get_current_user
@@ -17,7 +18,10 @@ from src.schemas import (
     SimuladoResumoResultado,
     StatusResultado,
 )
-from src.services.sorteio_questoes import sortear_questoes_para_prova
+from src.services.sorteio_questoes import (
+    embaralhar_alternativas_questao,
+    sortear_questoes_para_prova,
+)
 
 router = APIRouter(prefix="/aluno", tags=["Aluno"])
 
@@ -52,28 +56,57 @@ def _texto_alternativa(alternativas: list, letra: str | None) -> str | None:
     return None
 
 
+def _resolver_resposta_original(alternativas_embaralhadas: list | None, resposta_aluno: str | None) -> str | None:
+    if not resposta_aluno or not alternativas_embaralhadas:
+        return resposta_aluno
+    for alt in alternativas_embaralhadas:
+        if isinstance(alt, dict) and alt.get("letra", "").upper() == resposta_aluno.upper():
+            return alt.get("letraOriginal", resposta_aluno)
+    return resposta_aluno
+
+
 def _montar_gabarito(tentativas_questoes: list) -> list[GabaritoItemDetalhado]:
     gabarito: list[GabaritoItemDetalhado] = []
     for tq in sorted(tentativas_questoes, key=lambda x: x.ordem):
-        alternativas = tq.questao.alternativas if isinstance(tq.questao.alternativas, list) else []
-        resposta_correta = tq.questao.respostaCorreta.upper()
-        resposta_aluno = tq.alternativaMarcada.upper() if tq.alternativaMarcada else None
+        alternativas_base = tq.questao.alternativas if isinstance(tq.questao.alternativas, list) else []
+        alternativas_embaralhadas = tq.alternativasEmbaralhadas if isinstance(getattr(tq, "alternativasEmbaralhadas", None), list) else None
+
+        resposta_correta_original = tq.questao.respostaCorreta.upper()
+        resposta_aluno_exibida = tq.alternativaMarcada.upper() if tq.alternativaMarcada else None
+        resposta_aluno_original = _resolver_resposta_original(alternativas_embaralhadas, resposta_aluno_exibida)
+
+        correta = resposta_aluno_original == resposta_correta_original
+
+        texto_marcada = _texto_alternativa(
+            alternativas_embaralhadas or alternativas_base,
+            resposta_aluno_exibida,
+        )
+        texto_correta = _texto_alternativa(alternativas_base, resposta_correta_original)
+
         gabarito.append(GabaritoItemDetalhado(
             ordem=tq.ordem,
             questaoId=tq.questaoId,
             enunciado=tq.questao.enunciado,
-            alternativaMarcada=_texto_alternativa(alternativas, resposta_aluno),
-            alternativaCorreta=_texto_alternativa(alternativas, resposta_correta) or resposta_correta,
-            correta=resposta_aluno == resposta_correta,
+            alternativaMarcada=texto_marcada,
+            alternativaCorreta=texto_correta or resposta_correta_original,
+            correta=correta,
         ))
     return gabarito
 
 
 def _contar_acertos(tentativas_questoes: list) -> int:
-    return sum(
-        1 for tq in tentativas_questoes
-        if tq.alternativaMarcada and tq.alternativaMarcada.upper() == tq.questao.respostaCorreta.upper()
-    )
+    total = 0
+    for tq in tentativas_questoes:
+        if not tq.alternativaMarcada:
+            continue
+        alternativas_embaralhadas = getattr(tq, "alternativasEmbaralhadas", None)
+        resposta_original = _resolver_resposta_original(
+            alternativas_embaralhadas if isinstance(alternativas_embaralhadas, list) else None,
+            tq.alternativaMarcada.upper(),
+        )
+        if resposta_original and resposta_original.upper() == tq.questao.respostaCorreta.upper():
+            total += 1
+    return total
 
 
 async def _notificar_gabarito_disponivel(usuario_id: str, resultado_id: str, titulo_simulado: str) -> None:
@@ -224,19 +257,24 @@ async def iniciar_prova(simulado_id: str, usuario=Depends(get_current_user)):
             )
 
         tentativas_ordenadas = sorted(resultado_existente.tentativasQuestoes, key=lambda tq: tq.ordem)
-        questoes = [
-            QuestaoParaAluno(
+        questoes = []
+        for tq in tentativas_ordenadas:
+            alts_raw = getattr(tq, "alternativasEmbaralhadas", None)
+            alts = (
+                [AlternativaParaAluno(letra=a.get("letra", ""), texto=a.get("texto", "")) for a in alts_raw]
+                if isinstance(alts_raw, list)
+                else [
+                    AlternativaParaAluno(letra=a.get("letra", ""), texto=a.get("texto", ""))
+                    for a in (tq.questao.alternativas if isinstance(tq.questao.alternativas, list) else [])
+                ]
+            )
+            questoes.append(QuestaoParaAluno(
                 ordem=tq.ordem,
                 questaoId=tq.questaoId,
                 enunciado=tq.questao.enunciado,
-                alternativas=[
-                    AlternativaParaAluno(letra=a.get("letra", ""), texto=a.get("texto", ""))
-                    for a in (tq.questao.alternativas if isinstance(tq.questao.alternativas, list) else [])
-                ],
+                alternativas=alts,
                 respostaSalva=tq.alternativaMarcada,
-            )
-            for tq in tentativas_ordenadas
-        ]
+            ))
 
         return IniciarProvaResponse(
             resultadoId=resultado_existente.id,
@@ -266,28 +304,39 @@ async def iniciar_prova(simulado_id: str, usuario=Depends(get_current_user)):
         }
     )
 
+    questoes_response = []
     for q in questoes_sorteadas:
+        alternativas_originais = q["alternativas"]
+        resposta_correta = q["respostaCorreta"]
+
+        if simulado.embaralharAlternativas:
+            alternativas_exibidas, _ = embaralhar_alternativas_questao(
+                alternativas_originais, resposta_correta
+            )
+            alts_para_salvar = Json(alternativas_exibidas)
+        else:
+            alternativas_exibidas = alternativas_originais
+            alts_para_salvar = None
+
         await db.tentativaquestao.create(
             data={
                 "resultado": {"connect": {"id": novo_resultado.id}},
                 "questao": {"connect": {"id": q["questaoId"]}},
                 "ordem": q["ordem"],
+                **({"alternativasEmbaralhadas": alts_para_salvar} if alts_para_salvar else {}),
             }
         )
 
-    questoes_response = [
-        QuestaoParaAluno(
+        questoes_response.append(QuestaoParaAluno(
             ordem=q["ordem"],
             questaoId=q["questaoId"],
             enunciado=q["enunciado"],
             alternativas=[
                 AlternativaParaAluno(letra=a["letra"], texto=a["texto"])
-                for a in q["alternativas"]
+                for a in alternativas_exibidas
             ],
             respostaSalva=None,
-        )
-        for q in questoes_sorteadas
-    ]
+        ))
 
     return IniciarProvaResponse(
         resultadoId=novo_resultado.id,
@@ -484,7 +533,7 @@ async def historico(usuario=Depends(get_current_user)):
             componente=r.simulado.componente.nome,
             pontuacao=r.pontuacao,
             acertos=acertos,
-            total=len(r.tentativasQuestoes),
+            total=total,
             statusResultado=StatusResultado(r.statusResultado),
             finalizadoEm=r.finalizadoEm,
             gabaritoDisponivel=agora >= janela_fim,

@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.database import db
@@ -5,6 +7,7 @@ from src.dependencies import get_current_user, require_admin
 from src.schemas import (
     ComponenteResumo,
     DisponibilidadeQuestoes,
+    GeracaoRapidaCreate,
     ModalidadeResumo,
     SimuladoCreate,
     SimuladoResponse,
@@ -62,7 +65,21 @@ def _serializar_simulado(simulado_obj) -> SimuladoResponse:
         status=simulado_obj.status,
         criadoEm=simulado_obj.criadoEm,
         turmas=turmas,
+        embaralharAlternativas=simulado_obj.embaralharAlternativas,
     )
+
+
+async def _criar_aplicacoes(simulado_id: str, turma_ids: list[str], janela_inicio: datetime, janela_fim: datetime) -> None:
+    for turma_id in turma_ids:
+        await db.aplicacao.create(
+            data={
+                "simulado": {"connect": {"id": simulado_id}},
+                "turma": {"connect": {"id": turma_id}},
+                "dataInicio": janela_inicio,
+                "dataFim": janela_fim,
+                "status": "AGENDADA",
+            }
+        )
 
 
 @router.get("/disponibilidade", response_model=DisponibilidadeQuestoes)
@@ -87,6 +104,80 @@ async def obter_disponibilidade(
         medio=contadores["medio"],
         dificil=contadores["dificil"],
     )
+
+
+@router.post("/gerar-rapido", response_model=SimuladoResponse, status_code=201)
+async def gerar_rapido(data: GeracaoRapidaCreate, _=Depends(require_admin)):
+    componente = await db.componentecurricular.find_unique(
+        where={"id": data.componenteId},
+        include={"modalidade": True},
+    )
+    if not componente or not componente.ativo:
+        raise HTTPException(
+            status_code=422,
+            detail="Componente curricular não encontrado ou inativo",
+        )
+
+    disponiveis = await contar_disponiveis(data.componenteId)
+
+    qtd_facil = min(4, disponiveis["facil"])
+    qtd_medio = min(4, disponiveis["medio"])
+    qtd_dificil = min(2, disponiveis["dificil"])
+
+    if qtd_facil + qtd_medio + qtd_dificil < 1:
+        raise HTTPException(
+            status_code=422,
+            detail="Banco insuficiente para geração automática. Cadastre questões neste componente.",
+        )
+
+    professor_demo = await db.professor.find_first()
+    if not professor_demo:
+        raise HTTPException(
+            status_code=500,
+            detail="Nenhum professor cadastrado no sistema.",
+        )
+
+    agora = datetime.now(timezone.utc)
+    janela_inicio = agora + timedelta(minutes=5)
+    janela_fim = agora + timedelta(days=8)
+
+    novo = await db.simulado.create(
+        data={
+            "titulo": f"Etapa rápida — {componente.nome}",
+            "componente": {"connect": {"id": data.componenteId}},
+            "professor": {"connect": {"id": professor_demo.id}},
+            "qtdFacil": qtd_facil,
+            "qtdMedio": qtd_medio,
+            "qtdDificil": qtd_dificil,
+            "vagas": data.vagas,
+            "duracaoMinutos": data.duracaoMinutos,
+            "janelaInicio": janela_inicio,
+            "janelaFim": janela_fim,
+            "status": "PUBLICADO",
+            "embaralharAlternativas": True,
+        },
+        include=_INCLUDE_COMPLETO,
+    )
+
+    for turma_id in data.turmaIds:
+        turma = await db.turma.find_unique(where={"id": turma_id})
+        if turma:
+            await db.aplicacao.create(
+                data={
+                    "simulado": {"connect": {"id": novo.id}},
+                    "turma": {"connect": {"id": turma_id}},
+                    "dataInicio": janela_inicio,
+                    "dataFim": janela_fim,
+                    "status": "AGENDADA",
+                }
+            )
+
+    simulado_completo = await db.simulado.find_unique(
+        where={"id": novo.id},
+        include=_INCLUDE_COMPLETO,
+    )
+
+    return _serializar_simulado(simulado_completo)
 
 
 @router.post("", response_model=SimuladoResponse, status_code=201)
@@ -144,20 +235,12 @@ async def criar_simulado(data: SimuladoCreate, _=Depends(require_admin)):
             "janelaInicio": data.janelaInicio,
             "janelaFim": data.janelaFim,
             "status": "PUBLICADO",
+            "embaralharAlternativas": data.embaralharAlternativas,
         },
         include=_INCLUDE_COMPLETO,
     )
 
-    for turma_id in turmas_validas:
-        await db.aplicacao.create(
-            data={
-                "simulado": {"connect": {"id": novo.id}},
-                "turma": {"connect": {"id": turma_id}},
-                "dataInicio": data.janelaInicio,
-                "dataFim": data.janelaFim,
-                "status": "AGENDADA",
-            }
-        )
+    await _criar_aplicacoes(novo.id, turmas_validas, data.janelaInicio, data.janelaFim)
 
     simulado_completo = await db.simulado.find_unique(
         where={"id": novo.id},
