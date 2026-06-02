@@ -115,3 +115,34 @@ async def test_violacao_requer_aluno(client, token_admin, auth, resultado_em_and
         headers=auth(token_admin),
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_painel_violacoes_lista_para_admin(
+    client, token_aluno, token_admin, auth, resultado_em_andamento
+):
+    await client.post(
+        f"/aluno/violacao/{resultado_em_andamento}",
+        json={"tipo": "trocou_aba"},
+        headers=auth(token_aluno),
+    )
+
+    resp = await client.get("/violacoes", headers=auth(token_admin))
+    assert resp.status_code == 200
+    corpo = resp.json()
+    assert corpo["total"] >= 1
+
+    ocorrencia = next(
+        (o for o in corpo["ocorrencias"] if o["resultadoId"] == resultado_em_andamento),
+        None,
+    )
+    assert ocorrencia is not None
+    assert ocorrencia["tipo"] == "trocou_aba"
+    assert ocorrencia["etapaTitulo"] == "TESTE violacao"
+    assert any(e["etapaTitulo"] == "TESTE violacao" for e in corpo["porEtapa"])
+
+
+@pytest.mark.asyncio
+async def test_painel_violacoes_requer_admin(client, token_aluno, auth):
+    resp = await client.get("/violacoes", headers=auth(token_aluno))
+    assert resp.status_code == 403

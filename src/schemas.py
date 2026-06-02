@@ -392,6 +392,31 @@ class ViolacaoItem(BaseModel):
     criadoEm: datetime
 
 
+class ViolacaoPainelItem(BaseModel):
+    id: str
+    resultadoId: str
+    tipo: str
+    detalhe: str | None = None
+    criadoEm: datetime
+    alunoNome: str
+    alunoCpf: str
+    etapaTitulo: str
+    componenteNome: str
+
+
+class ViolacaoEtapaResumo(BaseModel):
+    simuladoId: str
+    etapaTitulo: str
+    totalViolacoes: int
+    alunosEnvolvidos: int
+
+
+class ViolacaoPainelResponse(BaseModel):
+    total: int
+    porEtapa: list[ViolacaoEtapaResumo]
+    ocorrencias: list[ViolacaoPainelItem]
+
+
 class SimuladoLivrePorSorteio(BaseModel):
     componenteIds: list[str] = Field(min_length=1)
     qtdFacil: int = Field(ge=0, le=100)
