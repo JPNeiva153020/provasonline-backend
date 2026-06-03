@@ -546,6 +546,28 @@ class QuestaoBanco(BaseModel):
     componenteId: str
 
 
+class RelatorioItemAluno(BaseModel):
+    alunoNome: str
+    alunoCpf: str
+    turma: str | None = None
+    nota: float | None = None
+    acertos: int | None = None
+    total: int
+    statusResultado: StatusResultado
+    finalizadoEm: datetime | None = None
+
+
+class RelatorioEtapaResponse(BaseModel):
+    simuladoId: str
+    titulo: str
+    componente: str
+    totalAlunos: int
+    finalizados: int
+    mediaNota: float | None = None
+    percentualAcerto: float | None = None
+    itens: list[RelatorioItemAluno]
+
+
 class DisciplinaSimulado(BaseModel):
     nome: str
     componenteIds: list[str]
