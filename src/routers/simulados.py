@@ -11,10 +11,13 @@ from src.schemas import (
     GeracaoRapidaCreate,
     ModalidadeResumo,
     QuestaoBanco,
+    RelatorioEtapaResponse,
+    RelatorioItemAluno,
     SimuladoCreate,
     SimuladoResponse,
     TurmaResumoSimples,
 )
+from src.routers.aluno import _contar_acertos
 from src.services.sorteio_questoes import (
     contar_disponiveis,
     verificar_disponibilidade,
@@ -330,3 +333,75 @@ async def buscar_simulado(simulado_id: str, _=Depends(get_current_user)):
     if not simulado:
         raise HTTPException(status_code=404, detail="Simulado não encontrado")
     return _serializar_simulado(simulado)
+
+
+@router.get("/{simulado_id}/relatorio", response_model=RelatorioEtapaResponse)
+async def relatorio_etapa(simulado_id: str, _=Depends(require_admin)):
+    simulado = await db.simulado.find_unique(
+        where={"id": simulado_id},
+        include={"componente": True},
+    )
+    if not simulado:
+        raise HTTPException(status_code=404, detail="Etapa não encontrada")
+
+    resultados = await db.resultadoaluno.find_many(
+        where={"simuladoId": simulado_id},
+        include={
+            "aluno": {
+                "include": {
+                    "usuario": True,
+                    "turmas": {
+                        "where": {"saiuEm": None},
+                        "include": {"turma": True},
+                        "take": 1,
+                    },
+                }
+            },
+            "tentativasQuestoes": {"include": {"questao": True}},
+        },
+        order={"finalizadoEm": "desc"},
+    )
+
+    itens: list[RelatorioItemAluno] = []
+    notas: list[float] = []
+    finalizados = 0
+
+    for r in resultados:
+        aluno = r.aluno
+        usuario = aluno.usuario if aluno else None
+        vinculo = aluno.turmas[0] if aluno and aluno.turmas else None
+        turma_nome = vinculo.turma.nome if vinculo and vinculo.turma else None
+
+        total = len(r.tentativasQuestoes)
+        concluido = r.statusResultado in ("FINALIZADO", "EXPIRADO")
+        acertos = _contar_acertos(r.tentativasQuestoes) if concluido else None
+
+        if r.statusResultado == "FINALIZADO":
+            finalizados += 1
+            if r.pontuacao is not None:
+                notas.append(r.pontuacao)
+
+        itens.append(RelatorioItemAluno(
+            alunoNome=usuario.nome if usuario else "—",
+            alunoCpf=usuario.cpf if usuario else "—",
+            turma=turma_nome,
+            nota=r.pontuacao,
+            acertos=acertos,
+            total=total,
+            statusResultado=r.statusResultado,
+            finalizadoEm=r.finalizadoEm,
+        ))
+
+    media = round(sum(notas) / len(notas), 1) if notas else None
+    percentual = round(media * 10, 1) if media is not None else None
+
+    return RelatorioEtapaResponse(
+        simuladoId=simulado.id,
+        titulo=simulado.titulo,
+        componente=simulado.componente.nome if simulado.componente else "—",
+        totalAlunos=len(resultados),
+        finalizados=finalizados,
+        mediaNota=media,
+        percentualAcerto=percentual,
+        itens=itens,
+    )
